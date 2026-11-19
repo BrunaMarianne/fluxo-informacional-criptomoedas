@@ -1,0 +1,142 @@
+---
+title: "Importação dos dados - Dissertação do mestrado"
+author: "Bruna Mariane"
+date: "2026-07-26"
+output:
+  html_document:
+    df_print: paged
+---
+
+1. Importação e leitura dos pacotes
+```{r}
+install.packages("ggplot2")
+install.packages("tidyr")
+```
+
+```{r}
+library(quantmod) 
+library(ggplot2) 
+library(tidyr)
+install.packages("readxl")  
+library(readxl)
+install.packages("dplyr")
+library(dplyr)
+```
+
+2. Importação das séries de criptos e filtragem dos dados de 2018 à 2025.
+```{r}
+options(scipen = 999) #desativa notação científica
+
+criptos_bruta <- c("ADA-USD", "EOS-USD", "BTC-USD", "ETH-USD", "LTC-USD")
+
+getSymbols(criptos_bruta, src = "yahoo", from = "2018-01-01", to = "2025-12-31")
+
+```
+3. Importação do índice S&P e filtragem do escopo.
+```{r}
+sp <- read_excel("Indice_2018_2026_tratado.xlsx")
+
+colnames(sp) <- c("Data", "SP")
+
+sp <- sp %>%
+  mutate(Data = as.Date(Data)) %>%
+  filter(Data >= as.Date("2018-01-01"),
+         Data <= as.Date("2025-12-31")) %>%
+  arrange(Data) #ordena a tabela do dia mais antigo, para o mais atual
+
+```
+
+
+4. Merge dos dados de cripto em um único df e ajustes no formato da tabela.
+```{r}
+# 1. Extrair a coluna de preço de fechamento ajustado (Ad) de cada ativo e juntar
+precos <- do.call(merge, lapply(criptos_bruta, function(x) Ad(get(x))))
+colnames(precos) <- criptos_bruta
+
+```
+
+```{r}
+# 2. Converter o objeto 'xts' para Dataframe e transformar para o formato "longo"
+df_precos <- data.frame(Data = index(precos), coredata(precos))
+df_precos_longo <- pivot_longer(df_precos, cols = -Data, names_to = "Cripto", values_to = "Preco")
+```
+
+5. Merge de SP ao data frame de preços
+5.1 Revisão do formato Date
+
+```{r}
+
+df_precos <- df_precos %>%
+  mutate(Data = as.Date(Data))
+
+sp <- sp %>%
+  mutate(Data = as.Date(Data))
+```
+
+
+5.2 Ordenar os dados
+```{r}
+
+df_precos <- df_precos %>%
+  arrange(Data)
+
+sp <- sp %>%
+  arrange(Data)
+
+```
+
+
+5.3 Remover datas duplicadas
+```{r}
+
+df_precos <- df_precos %>%
+  distinct(Data, .keep_all = TRUE)
+
+sp <- sp %>%
+  distinct(Data, .keep_all = TRUE)
+
+```
+
+
+5.4 Check missings
+```{r}
+
+cat("Valores ausentes em df_precos:\n")
+colSums(is.na(df_precos))
+
+cat("\nValores ausentes em SP:\n")
+colSums(is.na(sp))
+
+```
+
+5.5 Left join
+```{r}
+
+df_precos <- df_precos %>%
+  left_join(sp, by = "Data")
+
+```
+
+
+5.6 Verificação final
+```{r}
+
+cat("\nDimensão da base:\n")
+dim(df_precos)
+
+cat("\nPrimeiras observações:\n")
+head(df_precos)
+
+cat("\nÚltimas observações:\n")
+tail(df_precos)
+
+cat("\nValores ausentes após a junção:\n")
+colSums(is.na(df_precos))
+
+cat("\nDuplicatas na coluna Data:\n")
+sum(duplicated(df_precos$Data))
+
+cat("\nDatas em ordem crescente?\n")
+is.unsorted(df_precos$Data) == FALSE
+
+```

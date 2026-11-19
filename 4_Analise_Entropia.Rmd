@@ -1,0 +1,515 @@
+---
+title: "Cálculos de entropia - Dissertação do mestrado"
+author: "Bruna Mariane"
+date: "2026-08-02"
+output:
+  html_document:
+    df_print: paged
+---
+```{r}
+#unlink("C:/Users/bruna/AppData/Local/R/win-library/4.5/00LOCK", recursive = TRUE)
+```
+
+```{r}
+install.packages("RTransferEntropy")
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("ggplot2")
+install.packages("openxlsx")
+install.packages("future")
+
+```
+
+```{r}
+library(RTransferEntropy)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(openxlsx)
+library(future) 
+```
+
+Configuração do uso de múltiplos núcleos de processamento
+
+```{r}
+plan(multisession)
+```
+
+```{r}
+str(df_retornos)
+
+ativos <- setdiff(colnames(df_retornos), "Data")
+cat("Ativos analisados:", paste(ativos, collapse = ", "), "\n")
+```
+
+```{r}
+combinaçoes <- combn(ativos, 2, simplify = FALSE)
+
+resultados_te <- data.frame()
+
+set.seed(123)
+
+for (par in combinaçoes) {
+  ativo_A <- par[1]
+  ativo_B <- par[2]
+  
+  serie_A <- df_retornos[[ativo_A]]
+  serie_B <- df_retornos[[ativo_B]]
+  
+  #Entropia de transferência
+  te_fit <- transfer_entropy(
+    x = serie_A,
+    y = serie_B,
+    lx = 1,
+    ly = 1,
+    nboot = 10000,
+    shuffles = 100
+  )
+  
+  #Extração da matriz de coeficientes
+  res_summary <- coef(te_fit)
+  
+  #Acesso por posição (índices numéricos):
+  #Linha 1 = X -> Y (Ativo A -> Ativo B)
+  #Linha 2 = Y -> X (Ativo B -> Ativo A)
+  #Coluna 1 = TE | Coluna 2 = ETE | Coluna 4 = p-valor
+  
+  te_A_B  <- res_summary[1, 1] 
+  ete_A_B <- res_summary[1, 2] 
+  p_A_B   <- round(res_summary[1, 4], 4) # p-valor arredondado para 4 casas
+  
+  te_B_A  <- res_summary[2, 1] 
+  ete_B_A <- res_summary[2, 2] 
+  p_B_A   <- round(res_summary[2, 4], 4) # p-valor arredondado para 4 casas
+  
+  #Net Entropy
+  net_ete_A_B <- ete_A_B - ete_B_A
+  net_ete_B_A <- ete_B_A - ete_A_B
+  
+  #A -> B
+  resultados_te <- rbind(resultados_te, data.frame(
+    Origem = ativo_A,
+    Destino = ativo_B,
+    TE = te_A_B,
+    ETE = ete_A_B,
+    p_valor = p_A_B,
+    Net_ETE = net_ete_A_B
+  ))
+  
+  #B -> A
+  resultados_te <- rbind(resultados_te, data.frame(
+    Origem = ativo_B,
+    Destino = ativo_A,
+    TE = te_B_A,
+    ETE = ete_B_A,
+    p_valor = p_B_A,
+    Net_ETE = net_ete_B_A
+  ))
+}
+
+# (Opcional) Força todas as colunas numéricas a terem 4 casas no RMarkdown
+resultados_te <- resultados_te %>%
+  mutate(across(where(is.numeric), ~ round(., 4)))
+
+head(resultados_te)
+```
+
+```{r}
+# Força todas as colunas numéricas a exibirem exatamente 4 casas decimais (com zeros à direita)
+resultados_te_visual <- resultados_te %>%
+  mutate(across(where(is.numeric), ~ sprintf("%.4f", .)))
+
+print(resultados_te_visual)
+```
+
+```{r}
+# Matriz de ETE
+matriz_ete <- resultados_te %>%
+select(Origem, Destino, ETE) %>%
+pivot_wider(names_from = Destino, values_from = ETE) %>%
+as.data.frame()
+
+rownames(matriz_ete) <- matriz_ete$Origem
+matriz_ete$Origem <- NULL
+matriz_ete[is.na(matriz_ete)] <- 0
+
+# Matriz de Net Entropy
+matriz_net <- resultados_te %>%
+select(Origem, Destino, Net_ETE) %>%
+pivot_wider(names_from = Destino, values_from = Net_ETE) %>%
+as.data.frame()
+
+rownames(matriz_net) <- matriz_net$Origem
+matriz_net$Origem <- NULL
+matriz_net[is.na(matriz_net)] <- 0
+
+cat("--- Matriz de Entropia de Transferência Efetiva (ETE) ---\n")
+print(round(matriz_ete, 5))
+
+cat("\n--- Matriz de Net Entropy (Fluxo Líquido) ---\n")
+print(round(matriz_net, 5))
+```
+
+Criação dos Heatmaps
+```{r}
+ggplot(resultados_te, aes(x = Destino, y = Origem, fill = ETE)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", name = "ETE") +
+  theme_minimal() +
+  labs(
+    title = "Matriz de Entropia de Transferência Efetiva (ETE)",
+    subtitle = "Direção do Fluxo de Informação: Origem -> Destino",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# O pipe (%>%) processa as variáveis antes de repassar ao ggplot
+resultados_te %>%
+  mutate(
+    # Garante a leitura numérica para evitar erros de formatação prévia
+    p_num = as.numeric(as.character(p_valor)),
+    ete_num = as.numeric(as.character(ETE)),
+    
+    # Define a significância (ajuste os limites se necessário para sua metodologia)
+    asteriscos = case_when(
+      is.na(p_num) ~ "",
+      p_num <= 0.01 ~ "***",
+      p_num <= 0.05 ~ "**",
+      p_num <= 0.10 ~ "*",
+      p_num <= 0.15 ~ ".", # Ponto para significância marginal, como sugerido
+      TRUE ~ ""
+    ),
+    
+    # Une o número com 4 casas decimais e o símbolo na linha de baixo (\n)
+    rotulo = paste0(sprintf("%.4f", ete_num), "\n", asteriscos)
+  ) %>%
+  ggplot(aes(x = Destino, y = Origem, fill = ete_num)) +
+  geom_tile(color = "white") +
+  # Insere o texto: muda para branco se o ETE escurecer a célula, mantém preto se for claro
+  geom_text(aes(label = rotulo, 
+                color = ifelse(ete_num >= 0.0005, "white", "black")), 
+            size = 3.5, lineheight = 0.8, show.legend = FALSE) +
+  scale_color_identity() + # Força o R a entender "white" e "black" como cores
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", name = "ETE",
+                      labels = function(x) sprintf("%.4f", x)) +
+  theme_minimal() +
+  labs(
+    title = "Matriz de Entropia de Transferência Efetiva (ETE)",
+    subtitle = "Direção do Fluxo de Informação: Origem -> Destino",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+s```
+
+```{r}
+ggplot(resultados_te, aes(x = Destino, y = Origem, fill = Net_ETE)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(
+    low = "#f7fbff", 
+    mid = "#cfe2f3", 
+    high = "#08306b", 
+    midpoint = 0,
+    name = "Net ETE"
+  ) + 
+
+  theme_minimal() +
+  labs(
+    title = "Matriz de Net Entropy (Fluxo Líquido de Informação)",
+    subtitle = "Valores positivos (verdes) indicam que a Origem é doadora líquida",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+```
+
+```{r}
+ggplot(resultados_te, aes(x = Destino, y = Origem, fill = Net_ETE)) +
+  geom_tile(color = "white") +
+  
+  # Tratamento absoluto para NA no texto e na cor do autocontraste (4 casas decimais)
+  geom_text(aes(
+    label = ifelse(is.na(Net_ETE), "", sprintf("%.4f", Net_ETE)),
+    color = ifelse(is.na(Net_ETE), "transparent", 
+                   ifelse(Net_ETE > mean(range(Net_ETE, na.rm = TRUE)), "white", "black"))
+  ), size = 3.5) +
+  
+  scale_fill_gradient2(
+    low = "#f7fbff", 
+    mid = "#cfe2f3", 
+    high = "#08306b", 
+    midpoint = 0,
+    name = "Net ETE",
+    na.value = "white" # Garante que células vazias fiquem brancas
+  ) + 
+  
+  # Lê as cores literais do geom_text (black, white, transparent)
+  scale_color_identity() +
+  
+  # Força a manutenção de todas as categorias nos eixos, impedindo cortes no gráfico
+  scale_x_discrete(drop = FALSE) +
+  scale_y_discrete(drop = FALSE) +
+  
+  theme_minimal() +
+  labs(
+    title = "Matriz de Net Entropy (Fluxo Líquido de Informação)",
+    subtitle = "Valores positivos indicam que a Origem é doadora líquida",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+```
+```{r}
+ggplot(resultados_te, aes(x = Destino, y = Origem, fill = ETE)) +
+  geom_tile(color = "white") +
+  
+  # Adiciona os números com 4 casas e aplica o autocontraste na fonte
+  geom_text(aes(label = sprintf("%.4f", ETE), 
+                color = ifelse(ETE >= 0.0005, "white", "black")), 
+            size = 3.5, show.legend = FALSE) +
+  
+  scale_color_identity() + # Lê as palavras "white" e "black" como cores reais
+  
+  # Paleta de cores mantida, formatando também a legenda lateral
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", name = "ETE",
+                      labels = function(x) sprintf("%.4f", x)) +
+  theme_minimal() +
+  labs(
+    title = "Matriz de Entropia de Transferência Efetiva (ETE)",
+    subtitle = "Direção do Fluxo de Informação: Origem -> Destino",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+
+```
+
+
+Exportação dos resultados para o excel
+```{r}
+wb <- createWorkbook()
+
+addWorksheet(wb, "Tabela_Completa")
+addWorksheet(wb, "Matriz_ETE")
+addWorksheet(wb, "Matriz_Net_Entropy")
+
+writeData(wb, "Tabela_Completa", resultados_te)
+writeData(wb, "Matriz_ETE", matriz_ete, rowNames = TRUE)
+writeData(wb, "Matriz_Net_Entropy", matriz_net, rowNames = TRUE)
+
+saveWorkbook(wb, "Resultados_TE_ETE_NetEntropy.xlsx", overwrite = TRUE)
+
+cat("Resultados em 'Resultados_TE_ETE_NetEntropy.xlsx'!\n")
+```
+
+
+Inclusão de resultados 01/11
+```{r}
+# Passo inicial: Transformar os dados para o formato longo (para o facet_wrap)
+df_long <- df_retornos %>%
+  pivot_longer(
+    cols = -Data, 
+    names_to = "Ativo", 
+    values_to = "Retorno"
+  ) %>%
+  drop_na()
+
+```
+
+
+```{r}
+# Gráfico 1: GRÁFICOS DE SÉRIES TEMPORAIS (3 Linhas x 2 Colunas)
+
+# ====================================================================
+# FIGURA 1: GRÁFICOS DE SÉRIES TEMPORAIS (Tons de Azul)
+# ====================================================================
+
+# Definindo 6 tons de azul com bom contraste para o fundo branco
+tons_de_azul <- c("#08306b", "#08519c", "#2171b5", "#4292c6", "#004488", "#002255") 
+
+grafico_series <- ggplot(df_long, aes(x = Data, y = Retorno, color = Ativo)) +
+  geom_line(show.legend = FALSE, linewidth = 0.4) +
+  facet_wrap(~ Ativo, ncol = 2, nrow = 3, scales = "free_y") +
+  theme_minimal() +
+  scale_color_manual(values = tons_de_azul) + # <-- Aplicação da paleta azul
+  labs(
+    title = "Séries Temporais dos Log-Retornos",
+    x = "Data",
+    y = "Log-Retorno"
+  ) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(grafico_series)
+ggsave("Series_Temporais_Azul.png", plot = grafico_series, width = 10, height = 8, dpi = 300)
+```
+
+
+```{r}
+
+# ====================================================================
+# Gráfico 2: HISTOGRAMAS COM CURVAS NORMAIS (3 Linhas x 2 Colunas)
+# ====================================================================
+
+# 2.1 Extrair a média e o desvio padrão de cada criptoativo/índice
+parametros_normais <- df_long %>%
+  group_by(Ativo) %>%
+  summarise(
+    media = mean(Retorno, na.rm = TRUE),
+    desvio = sd(Retorno, na.rm = TRUE)
+  )
+
+# 2.2 Criar um grid de coordenadas para traçar a curva vermelha exata em cada faceta
+grid_normal <- df_long %>%
+  group_by(Ativo) %>%
+  reframe(
+    x_val = seq(min(Retorno, na.rm = TRUE), max(Retorno, na.rm = TRUE), length.out = 100)
+  ) %>%
+  left_join(parametros_normais, by = "Ativo") %>%
+  mutate(y_val = dnorm(x_val, mean = media, sd = desvio))
+
+# 2.3 Plotar os histogramas (usando densidade) sobrepostos pelas curvas normais
+grafico_histogramas <- ggplot(df_long, aes(x = Retorno)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 40, fill = "#bcbcbc", color = "white", alpha = 0.8) +
+  geom_line(data = grid_normal, aes(x = x_val, y = y_val), color = "darkred", linewidth = 1) +
+  facet_wrap(~ Ativo, ncol = 2, nrow = 3, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "Histogramas de Frequência e Curvas Normais Ajustadas",
+    x = "Log-Retorno",
+    y = "Densidade"
+  ) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5)
+  )
+
+print(grafico_histogramas)
+ggsave("Histogramas_Normal.png", plot = grafico_histogramas, width = 10, height = 8, dpi = 300)
+
+```
+
+```{r}
+#Gráfico Net Entropy
+
+library(dplyr)
+library(ggplot2)
+
+resultados_te %>%
+  mutate(
+    # Conversão segura para números
+    p_num = as.numeric(as.character(p_valor)),
+    net_num = as.numeric(as.character(Net_ETE)),
+    
+    # Lógica de significância com limite estrito de 5%
+    asteriscos = case_when(
+      is.na(p_num) ~ "",
+      p_num <= 0.01 ~ "***",
+      p_num <= 0.05 ~ "**",
+      TRUE ~ ""
+    ),
+    
+    # Combina os 4 decimais com o asterisco. Células NA ficam vazias.
+    rotulo = ifelse(is.na(net_num), "", paste0(sprintf("%.4f", net_num), "\n", asteriscos))
+  ) %>%
+  ggplot(aes(x = Destino, y = Origem, fill = net_num)) +
+  geom_tile(color = "white") +
+  
+  # Tratamento para NA no texto e lógica de autocontraste
+  geom_text(aes(
+    label = rotulo,
+    color = ifelse(is.na(net_num), "transparent", 
+                   ifelse(net_num > mean(range(net_num, na.rm = TRUE)), "white", "black"))
+  ), size = 3.5, lineheight = 0.8, show.legend = FALSE) +
+  
+  # Paleta divergente original com legenda formatada para 4 casas
+  scale_fill_gradient2(
+    low = "#f7fbff", 
+    mid = "#cfe2f3", 
+    high = "#08306b", 
+    midpoint = 0,
+    name = "Net ETE",
+    na.value = "white",
+    labels = function(x) sprintf("%.4f", x)
+  ) + 
+  
+  scale_color_identity() +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_discrete(drop = FALSE) +
+  
+  theme_minimal() +
+  labs(
+    title = "Matriz de Net Entropy (Fluxo Líquido de Informação)",
+    subtitle = "Valores positivos indicam que a Origem é doadora líquida",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+```
+
+```{r}
+#Gráfico ajustado ETE
+
+library(dplyr)
+library(ggplot2)
+
+resultados_te %>%
+  mutate(
+    p_num = as.numeric(as.character(p_valor)),
+    asteriscos = case_when(
+      is.na(p_num) ~ "",
+      p_num <= 0.01 ~ "***",
+      p_num <= 0.05 ~ "**", # Limite de 5% destacado pelo orientador
+      p_num <= 0.10 ~ "*",
+      TRUE ~ ""
+    ),
+    rotulo = ifelse(is.na(ETE), "", paste0(sprintf("%.4f", ETE), "\n", asteriscos))
+  ) %>%
+  ggplot(aes(x = Destino, y = Origem, fill = ETE)) +
+  geom_tile(color = "white") +
+  geom_text(aes(
+    label = rotulo,
+    color = ifelse(is.na(ETE), "transparent", 
+                   ifelse(ETE > mean(range(ETE, na.rm = TRUE)), "white", "black"))
+  ), size = 3.5, lineheight = 0.8) +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", name = "ETE", na.value = "white") +
+  scale_color_identity() + 
+  scale_x_discrete(drop = FALSE) +
+  scale_y_discrete(drop = FALSE) +
+  theme_minimal() +
+  labs(
+    title = "Matriz de Entropia de Transferência Efetiva (ETE)",
+    subtitle = "Direção do Fluxo de Informação: Origem -> Destino",
+    x = "Receptor (Destino)",
+    y = "Transmissor (Origem)"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(face = "bold", size = 14))
+```
+

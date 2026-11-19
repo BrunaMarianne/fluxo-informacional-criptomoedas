@@ -1,0 +1,158 @@
+---
+title: "Descritivas dos dados - Dissertação do mestrado"
+author: "Bruna Mariane"
+date: "2026-06-06"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+install.packages("ggplot2")
+install.packages("tidyr")
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("PerformanceAnalytics")
+install.packages("moments")
+
+```
+
+
+```{r}
+library(quantmod) 
+library(ggplot2) 
+library(tidyr)
+library(readxl)
+library(dplyr)
+library(PerformanceAnalytics)
+library(moments)
+```
+
+1. Criação de função para padronizar os dados do df.
+```{r}
+#Funções chatgpt
+
+retornos <- function(df){
+
+  df %>%
+    mutate(
+      Retorno = Return.calculate(Fechamento,
+                                 method = "log")
+    ) %>%
+    na.omit()
+
+}
+
+```
+
+
+2. Criação de função para cálculo das descritivas
+```{r}
+library(moments) 
+
+descritivas <- function(x){
+  data.frame(
+    Média = mean(x, na.rm = TRUE),
+    Mediana = median(x, na.rm = TRUE),
+    Mínimo = min(x, na.rm = TRUE),
+    Máximo = max(x, na.rm = TRUE),
+    Q1 = quantile(x, 0.25, na.rm = TRUE),
+    Q3 = quantile(x, 0.75, na.rm = TRUE),
+    Desvio_Padrão = sd(x, na.rm = TRUE),
+    Coeficiente_Variação = sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE),
+    Assimetria = skewness(x, na.rm = TRUE),
+    Curtose = kurtosis(x, na.rm = TRUE)
+  )
+}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+descritivas_ADA <- descritivas(df_retornos$ADA.USD)
+descritivas_BTC <- descritivas(df_retornos$BTC.USD)
+descritivas_EOS <- descritivas(df_retornos$EOS.USD)
+descritivas_ETH <- descritivas(df_retornos$ETH.USD)
+descritivas_LTC <- descritivas(df_retornos$LTC.USD)
+descritivas_SP <- descritivas(df_retornos$SP)  ## AJUSTAR!!
+
+
+descritivas_ADA
+descritivas_BTC
+descritivas_EOS
+descritivas_ETH
+descritivas_LTC
+descritivas_SP
+
+```
+
+```{r}
+
+# Execute no seu R para gerar a tabela em texto limpo:
+rbind(descritivas_ADA, descritivas_BTC, descritivas_EOS, 
+      descritivas_ETH, descritivas_LTC, descritivas_SP)
+```
+
+
+```{r}
+# # 3. Gráfico de evolução dos preços de todos os ativos juntos
+# grafico_precos <- ggplot(df_precos_longo, aes(x = Data, y = Preco, color = Cripto)) +
+#   geom_line(linewidth = 0.5) +
+#   facet_wrap(~Cripto, scales = "free_y", ncol = 2) + # Painéis individuais com eixo Y livre
+#   theme_minimal() +
+#   labs(
+#     title = "Evolução do Preço de Fechamento Ajustado",
+#     subtitle = "Gráficos com escalas independentes (Eixo Y livre) por ativo",
+#     x = "Ano",
+#     y = "Preço ($USD$)"
+#   ) +
+#   theme(
+#     legend.position = "none",
+#     plot.title = element_text(face = "bold", size = 14),
+#     strip.text = element_text(face = "bold", size = 11)
+#   )
+# 
+# print(grafico_precos)
+```
+
+
+```{r}
+# 4. Gráficos Individuais por Ativo
+# 
+# # Descobrir quais criptomoedas únicas existem no seu dataframe longo
+# lista_criptos <- unique(df_precos_longo$Cripto)
+# 
+# # Loop para filtrar o dataframe e gerar 1 gráfico exclusivo para cada ativo
+# for (ativo in lista_criptos) {
+#   
+#   # 1. Filtrar o dataframe geral apenas para as linhas do ativo atual
+#   df_individual <- subset(df_precos_longo, Cripto == ativo)
+#   
+#   # 2. Construir o gráfico customizado para a cripto da vez
+#   p <- ggplot(df_individual, aes(x = Data, y = Preco)) +
+#     geom_line(color = "darkblue", linewidth = 0.6) +
+#     theme_minimal() +
+#     labs(
+#       title = paste("Evolução Histórica -", ativo),
+#       subtitle = "Preço de Fechamento Ajustado (2018 - 2025)",
+#       x = "Ano",
+#       y = "Preço (USD)"
+#     ) +
+#     theme(
+#       plot.title = element_text(face = "bold", size = 14),
+#       axis.title = element_text(face = "bold")
+#     )
+#   
+#   # 3. Printar o gráfico na aba 'Plots' do RStudio
+#   print(p)
+#   
+#   # Pequena pausa para garantir a renderização sequencial no RStudio
+#   Sys.sleep(0.5)
+# }
+```

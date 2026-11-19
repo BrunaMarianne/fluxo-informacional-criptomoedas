@@ -1,0 +1,119 @@
+---
+title: "Avaliação de estacionariedade - Dissertação do mestrado"
+author: "Bruna Mariane"
+date: "2026-07-26"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+install.packages("dplyr")
+install.packages("tseries")
+install.packages("urca")
+install.packages("openxlsx")
+
+```
+
+```{r}
+library(dplyr)
+library(tseries)
+library(urca)
+library(openxlsx)
+```
+
+
+1. Cálculo dos retornos para o df_precos
+
+```{r}
+
+df_retornos <- df_precos %>%
+  arrange(Data) %>%
+  mutate(
+    across(
+      .cols = -Data,
+      .fns = ~ c(NA, diff(log(.)))
+    )
+  ) %>%
+  na.omit()
+
+```
+
+```{r}
+
+head(df_retornos)
+
+str(df_retornos)
+
+```
+
+
+2. Testes de estacionariedade
+
+```{r}
+
+teste_estacionariedade <- function(serie){
+
+  serie <- na.omit(serie)
+  # ADF
+  adf <- adf.test(serie)
+  # Phillips-Perron
+  pp <- pp.test(serie)
+  # KPSS
+  kpss <- kpss.test(serie)
+
+  data.frame(
+
+    ADF_Estatistica = unname(adf$statistic),
+    ADF_pvalor      = adf$p.value,
+
+    PP_Estatistica  = unname(pp$statistic),
+    PP_pvalor       = pp$p.value,
+
+    KPSS_Estatistica = unname(kpss$statistic),
+    KPSS_pvalor      = kpss$p.value
+
+  )
+
+}
+```
+
+```{r}
+library(tseries)
+```
+
+```{r}
+
+ativos <- names(df_retornos)[-1]
+
+resultado_estacionariedade <-
+
+bind_rows(
+
+lapply(ativos, function(i){
+
+  teste_estacionariedade(df_retornos[[i]]) |>
+
+    mutate(Ativo = i)
+
+})
+
+) |>
+
+select(
+
+Ativo,
+
+ADF_Estatistica,
+ADF_pvalor,
+
+PP_Estatistica,
+PP_pvalor,
+
+KPSS_Estatistica,
+KPSS_pvalor
+
+)
+
+print(resultado_estacionariedade)
+```
